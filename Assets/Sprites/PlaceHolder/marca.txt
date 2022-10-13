@@ -1,0 +1,65 @@
+public with sharing class MarcaFacturacionController {
+    transient private static final String MELI_ENDPOINT = 'https://api.mercadolibre.com';
+
+    @AuraEnabled
+    public static void updateAccountTag(Id acctId, String tag) {
+        Account acct = [
+            SELECT Id, Cust_Id__c, Cust_ID_Portal__c, Tags__c
+            FROM Account
+            WHERE Id = :acctId
+            FOR UPDATE
+        ];
+
+        String userId = updateClientOnAPI(acct, tag);
+        acct.Tags__c = tag;
+        update acct;
+    }
+
+    @AuraEnabled
+    public static Account getAccount(Id acctId) {
+        Account acct = [
+            SELECT Id, Name, Cust_Id__c,
+                   Cust_ID_Portal__c, Tags__c
+            FROM Account
+            WHERE Id = :acctId
+        ];
+
+        if (String.isEmpty(acct.Cust_ID__c) || String.isEmpty(acct.Cust_ID_Portal__c)) {
+            throw new AuraHandledException(System.Label.MARCA_FACTURACION_ERROR);
+        }
+
+        return acct;
+    }
+
+    private static String updateClientOnAPI(Account acct, String tag) {
+        String token = Test.isRunningTest() ? 'TEST' : TokenCache.get('local.APIToken', TokenCache.ADMIN).access_token;
+
+        APICallController controller = new APICallController();
+        controller.putAllowed = true;
+
+        Map<String, List<String>> tags = new Map<String, List<String>> {
+            'tags' => new List<String>()
+        };
+
+        if (String.isNotEmpty(tag)) {
+            tags.get('tags').add(tag);
+        }
+
+        String endpoint = String.format(
+            '{0}/{1}',
+            new List<String> {
+                API_URI.USERS,
+                acct.Cust_ID__c
+            }
+        );
+
+        APIParser parser = controller.PUT(
+            MELI_ENDPOINT + endpoint,
+            JSON.serialize(tags),
+            token,
+            APICallController.CONTENT_TYPE_JSON
+        );
+
+        return parser.getString('user_id');
+    }
+}
